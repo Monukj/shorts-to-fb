@@ -4,16 +4,18 @@ import asyncio
 import xml.etree.ElementTree as ET
 import requests
 from telethon import TelegramClient
+from telethon.sessions import StringSession
 
 # --- CONFIGURATION ---
 YOUTUBE_CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID", "UC2JeNtLYLDWCQroKQt3TPQQ")
 FB_PAGE_ID = os.getenv("FB_PAGE_ID", "61590685063175")
 FB_ACCESS_TOKEN = os.getenv("FB_ACCESS_TOKEN")
 
-# Telegram USER account details (Bypassing bot filter)
+# Telegram API & Session credentials
 API_ID = int(os.getenv("TG_API_ID"))
 API_HASH = os.getenv("TG_API_HASH")
-DOWNLOADER_BOT_USERNAME = "@SaveBlog" # Aapke bot ka handler ya username
+TG_SESSION_STRING = os.getenv("TG_SESSION_STRING")
+DOWNLOADER_BOT_USERNAME = "@SaveBlog" # Aapke bot ka username
 
 def is_already_posted_on_fb(title):
     print(f"[+] Checking Facebook Page feed for duplicate: '{title}'")
@@ -51,25 +53,26 @@ def get_latest_shorts():
         return []
 
 async def extract_video_via_user_side(youtube_url):
-    print(f"[+] Sending link from User Side to bot: {youtube_url}")
-    client = TelegramClient('user_session', API_ID, API_HASH)
-    await client.start()
+    print("[+] Connecting to Telegram via Saved Session String...")
+    # Bina kisi interactive input ke direct string based authorization
+    client = TelegramClient(StringSession(TG_SESSION_STRING), API_ID, API_HASH)
+    await client.connect()
     
     try:
-        # Aapki personal profile se message jayega, jisse bot trigger ho sake
+        # Aapki profile se bot ko link send hoga
         await client.send_message(DOWNLOADER_BOT_USERNAME, youtube_url)
-        print("[+] Message sent from your account. Waiting 25 seconds for bot response...")
+        print("[+] Link pushed from user context. Awaiting 25 seconds for bot reply...")
         await asyncio.sleep(25)
         
-        # Bot ki chat se video reply nikalna
+        # Latest messages mein se video file dhoodhna
         async for message in client.iter_messages(DOWNLOADER_BOT_USERNAME, limit=3):
             if message.video:
-                print("[+] Video found from bot reply!")
+                print("[+] Target video file payload found!")
                 file_path = await client.download_media(message.video, 'temp_short.mp4')
                 await client.disconnect()
                 return file_path
     except Exception as e:
-        print(f"[-] Telethon Error: {e}")
+        print(f"[-] Session Automation Error: {e}")
     
     await client.disconnect()
     return None
@@ -92,6 +95,7 @@ def upload_to_facebook_local(file_path, title):
 async def main():
     latest_shorts = get_latest_shorts()
     if not latest_shorts:
+        print("[-] No videos found in RSS feed.")
         return
     
     target_short = latest_shorts[0]
@@ -102,10 +106,14 @@ async def main():
     local_video = await extract_video_via_user_side(target_short['link'])
     if local_video and os.path.exists(local_video):
         if upload_to_facebook_local(local_video, target_short['title']):
-            print("[+] Success! Posted on Facebook via User-triggered Bot.")
+            print("[+] Success! Automation cycle complete.")
+        else:
+            print("[-] Failed to upload to Facebook.")
         
-        # Temp file clean karna
+        # Temporary downloaded video delete karna
         os.remove(local_video)
+    else:
+        print("[-] Could not retrieve video from Telegram bot responses.")
 
 if __name__ == "__main__":
     asyncio.run(main())
